@@ -264,8 +264,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let session = sessionStore.sessions.first(where: { $0.id == sessionId }),
               let dir = session.projectPath else { return }
         let projectDir = (dir as NSString).deletingLastPathComponent
-        guard let latest = CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir).first else { return }
-        sessionStore.restoreCheckpoint(latest, for: sessionId)
+        CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir) { [weak self] checkpoints in
+            guard let latest = checkpoints.first else { return }
+            self?.sessionStore.restoreCheckpoint(latest, for: sessionId)
+        }
     }
 
     @objc private func openSettings() {
@@ -280,12 +282,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func createNewSession() {
-        sessionStore.createQuickSession()
     @objc private func openLogsFolder() {
         CrashReporter.openLogsFolder()
     }
 
+    @objc private func createNewSession() {
+        sessionStore.createQuickSession()
         showPanelBelowStatusItem()
     }
 

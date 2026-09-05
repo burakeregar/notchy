@@ -339,10 +339,13 @@ class SessionStore {
             return
         }
         let projectDir = (dir as NSString).deletingLastPathComponent
-        let checkpoints = CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir)
-        lastCheckpoint = checkpoints.first
-        lastCheckpointProjectName = session.projectName
-        lastCheckpointProjectDir = projectDir
+        let sessionId = session.id
+        CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir) { [weak self] checkpoints in
+            guard let self, self.activeSessionId == sessionId else { return } // user switched tabs meanwhile
+            self.lastCheckpoint = checkpoints.first
+            self.lastCheckpointProjectName = session.projectName
+            self.lastCheckpointProjectDir = projectDir
+        }
     }
 
     /// Restore the most recent checkpoint for the active session
@@ -413,18 +416,18 @@ class SessionStore {
 
     func restartSession(_ id: UUID) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+        Log.info("Restarting session \(sessions[index].projectName)", category: "session")
         TerminalManager.shared.destroyTerminal(for: id)
         sessions[index].terminalStatus = .idle
         sessions[index].generation += 1
-        Log.info("Restarting session \(sessions[index].projectName)", category: "session")
     }
 
     func closeSession(_ id: UUID) {
         if let session = sessions.first(where: { $0.id == id }) {
+            Log.info("Closing session \(session.projectName)", category: "session")
             dismissedProjects[session.projectName] = false
         }
         TerminalManager.shared.destroyTerminal(for: id)
-            Log.info("Closing session \(session.projectName)", category: "session")
         sessions.removeAll { $0.id == id }
         if activeSessionId == id {
             activeSessionId = sessions.first?.id

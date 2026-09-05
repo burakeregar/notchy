@@ -45,7 +45,9 @@ struct SessionTab: View {
     private func refreshLatestCheckpoint() {
         guard let dir = session.projectPath else { return }
         let projectDir = (dir as NSString).deletingLastPathComponent
-        latestCheckpoint = CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir).first
+        CheckpointManager.shared.checkpoints(for: session.projectName, in: projectDir) { checkpoints in
+            latestCheckpoint = checkpoints.first
+        }
     }
 
     @ViewBuilder
@@ -146,9 +148,7 @@ struct SessionTab: View {
         .alert("Restore Last Checkpoint", isPresented: $showRestoreConfirmation) {
             Button("Restore", role: .destructive) {
                 if let checkpoint = latestCheckpoint {
-                    guard let dir = session.projectPath else { return }
-                    let projectDir = (dir as NSString).deletingLastPathComponent
-                    try? CheckpointManager.shared.restoreCheckpoint(checkpoint, to: projectDir)
+                    SessionStore.shared.restoreCheckpoint(checkpoint, for: session.id)
                 }
             }
             Button("Cancel", role: .cancel) {}
