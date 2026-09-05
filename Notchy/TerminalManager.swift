@@ -234,14 +234,23 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
             execName: "-" + (shell as NSString).lastPathComponent
         )
 
-        // cd to working directory, launch claude only if CLAUDE.md exists and integration is enabled
-        let escapedDir = shellEscape(workingDirectory)
-        let hasClaude = launchClaude && SettingsManager.shared.claudeIntegrationEnabled && FileManager.default.fileExists(atPath: (workingDirectory as NSString).appendingPathComponent("CLAUDE.md"))
-        if hasClaude {
-            terminal.send(txt: "cd \(escapedDir) && clear && claude\r")
-        } else {
-            terminal.send(txt: "cd \(escapedDir) && clear\r")
+        // Fall back to home if the persisted directory is empty or has since disappeared.
+        var directory = workingDirectory
+        if directory.isEmpty || !FileManager.default.fileExists(atPath: directory) {
+            Log.warning("Working directory '\(directory)' for session \(sessionId) is unavailable, using home", category: "terminal")
+            directory = NSHomeDirectory()
         }
+
+        // cd to working directory, launch claude only if CLAUDE.md exists and integration is enabled
+        let escapedDir = shellEscape(directory)
+        let hasClaude = launchClaude && SettingsManager.shared.claudeIntegrationEnabled && FileManager.default.fileExists(atPath: (directory as NSString).appendingPathComponent("CLAUDE.md"))
+        // Report once right after the cd so the stored directory is confirmed even
+        // if the shell's chpwd hook doesn't fire (e.g. already in that directory).
+        var command = cwdReportingHook(for: shell) + "cd \(escapedDir) && __notchy_cwd 2>/dev/null; clear"
+        if hasClaude {
+            command += " && claude"
+        }
+        terminal.send(txt: command + "\r")
 
         terminals[sessionId] = terminal
         return terminal
@@ -253,16 +262,55 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
 
+    /// Called when the shell reports its working directory via OSC 7 (see `cwdReportingHook`).
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
-        guard let dir = directory,
+        guard let payload = directory,
               let terminal = source as? ClickThroughTerminalView,
-              let sessionId = terminal.sessionId else { return }
+              let sessionId = terminal.sessionId,
+              let path = Self.path(fromOSC7Payload: payload) else { return }
         DispatchQueue.main.async {
-            SessionStore.shared.updateWorkingDirectory(sessionId, directory: dir)
+            Log.debug("Session \(sessionId) cwd -> \(path)", category: "terminal")
+            SessionStore.shared.updateWorkingDirectory(sessionId, directory: path)
         }
     }
 
-    func processTerminated(source: TerminalView, exitCode: Int32?) {}
+    /// OSC 7 carries a `file://host/path` URL. Accept both percent-encoded and raw paths.
+    static func path(fromOSC7Payload payload: String) -> String? {
+        var text = payload
+        if text.hasPrefix("file://") {
+            text.removeFirst("file://".count)
+            // Drop the host component; the path starts at the first slash.
+            if let slash = text.firstIndex(of: "/") {
+                text = String(text[slash...])
+            } else {
+                return nil
+            }
+        }
+        let path = text.removingPercentEncoding ?? text
+        guard path.hasPrefix("/") else { return nil }
+        return path
+    }
+
+    /// Shell snippet that makes the shell announce every directory change with
+    /// OSC 7, the same mechanism Terminal.app and iTerm2 use. Plain login shells
+    /// spawned by Notchy don't do this on their own, so persisted tabs would
+    /// otherwise never learn where the user `cd`-ed to.
+    private func cwdReportingHook(for shell: String) -> String {
+        let report = #"printf '\033]7;file://%s%s\007' "${HOST:-localhost}" "$PWD""#
+        switch (shell as NSString).lastPathComponent {
+        case "zsh":
+            return "__notchy_cwd() { \(report); }; autoload -Uz add-zsh-hook && add-zsh-hook chpwd __notchy_cwd; "
+        case "bash":
+            return "__notchy_cwd() { \(report); }; PROMPT_COMMAND=\"__notchy_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; "
+        default:
+            return ""
+        }
+    }
+
+    func processTerminated(source: TerminalView, exitCode: Int32?) {
+        let id = (source as? ClickThroughTerminalView)?.sessionId.map(\.uuidString) ?? "unknown"
+        Log.info("Shell process exited for session \(id) with code \(exitCode.map(String.init) ?? "nil")", category: "terminal")
+    }
 
     /// Returns the visible text from a terminal's buffer
     func visibleText(for sessionId: UUID) -> String? {
@@ -271,6 +319,9 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
     }
 
     func destroyTerminal(for sessionId: UUID) {
+        if terminals[sessionId] != nil {
+            Log.info("Destroying terminal for session \(sessionId)", category: "terminal")
+        }
         terminals.removeValue(forKey: sessionId)
     }
 
@@ -285,6 +336,3 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
-        if terminals[sessionId] != nil {
-            Log.info("Destroying terminal for session \(sessionId)", category: "terminal")
-        }

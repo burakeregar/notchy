@@ -44,7 +44,7 @@ struct TerminalSession: Identifiable {
         self.id = persisted.id
         self.projectName = persisted.projectName
         self.projectPath = persisted.projectPath
-        self.workingDirectory = persisted.workingDirectory
+        self.workingDirectory = persisted.workingDirectory.isEmpty ? NSHomeDirectory() : persisted.workingDirectory
         self.hasStarted = false
         self.terminalStatus = .idle
         self.generation = 0
