@@ -5,7 +5,6 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     var sessionId: UUID?
     private var keyMonitor: Any?
     private var statusDebounceWork: DispatchWorkItem?
-    private static let statusQueue = DispatchQueue(label: "com.notchy.status", qos: .utility)
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -72,17 +71,28 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
     }
 
     /// Returns all visible lines from the terminal buffer.
+    ///
+    /// Must run on the main thread: SwiftTerm mutates the buffer on the main
+    /// thread (feed/resize), and the `CircularList` of lines is not thread-safe.
+    /// Reading it concurrently caused every crash seen so far (use-after-free in
+    /// `CircularBufferLineList.subscript.read`).
     private func extractAllLines() -> [String]? {
+        dispatchPrecondition(condition: .onQueue(.main))
         let terminal = getTerminal()
         guard terminal.rows >= 20 else { return nil }
         var lineTexts: [String] = []
+        lineTexts.reserveCapacity(terminal.rows)
         for row in 0..<terminal.rows {
-            var line = ""
-            for col in 0..<terminal.cols {
-                let ch = terminal.getCharacter(col: col, row: row) ?? " "
-                line.append(ch == "\u{0}" ? " " : ch)
+            guard let line = terminal.getLine(row: row) else {
+                lineTexts.append(String(repeating: " ", count: terminal.cols))
+                continue
             }
-            lineTexts.append(line)
+            // One call per row instead of one `getCharacter` per cell.
+            let text = line.translateToString(trimRight: false, startCol: 0, endCol: terminal.cols) { cell in
+                let ch = cell.getCharacter()
+                return ch == "\u{0}" ? " " : ch
+            }
+            lineTexts.append(text)
         }
         return lineTexts
     }
@@ -95,17 +105,8 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
 
     /// Returns the last 20 non-blank lines of terminal output above the prompt separator.
     func extractVisibleText() -> String? {
-        guard var lineTexts = extractAllLines() else { return nil }
-
-        // Find the last horizontal rule separator (────...) which divides
-        // Claude's output from the user's current prompt input area.
-        // Only consider text above it so we don't capture the in-progress prompt.
-        let separator = "────────"
-        if let lastSeparatorIndex = lineTexts.lastIndex(where: { $0.contains(separator) }) {
-            lineTexts = Array(lineTexts.prefix(lastSeparatorIndex))
-        }
-
-        return relevantText(from: lineTexts)
+        guard let lineTexts = extractAllLines() else { return nil }
+        return Self.textAboveSeparator(lineTexts)
     }
 
     /// Returns the last 20 non-blank lines of the full terminal output (including prompt area).
@@ -119,20 +120,23 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
 
         guard let id = sessionId else { return }
 
-        // Debounce status checks on a background queue to avoid
-        // blocking the main thread with per-cell buffer reads.
+        // Debounce status checks so a burst of output triggers one evaluation.
+        // The evaluation stays on the main thread: the buffer read is now a
+        // handful of per-row calls, and the classification is a few string
+        // scans over at most ~50 short lines, so it is cheap enough here.
         statusDebounceWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.evaluateStatus(for: id)
         }
         statusDebounceWork = work
-        Self.statusQueue.asyncAfter(deadline: .now() + 0.15, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     private func evaluateStatus(for id: UUID) {
-        guard let visibleText = extractVisibleText() else { return }
-        let fullText = extractFullVisibleText() ?? visibleText
+        guard let lines = extractAllLines() else { return }
+        let visibleText = Self.textAboveSeparator(lines)
+        let fullText = relevantText(from: lines)
 
         let newStatus: TerminalStatus
 
@@ -148,10 +152,19 @@ class ClickThroughTerminalView: LocalProcessTerminalView {
         }
 
         if !SessionStore.shared.sessions.contains(where: {$0.id == id && $0.terminalStatus == newStatus}) {
-            DispatchQueue.main.async {
-                SessionStore.shared.updateTerminalStatus(id, status: newStatus)
-            }
+            SessionStore.shared.updateTerminalStatus(id, status: newStatus)
         }
+    }
+
+    /// Last 20 non-blank lines above the last horizontal rule (Claude's prompt separator).
+    private static func textAboveSeparator(_ lines: [String]) -> String {
+        var lineTexts = lines
+        let separator = "────────"
+        if let lastSeparatorIndex = lineTexts.lastIndex(where: { $0.contains(separator) }) {
+            lineTexts = Array(lineTexts.prefix(lastSeparatorIndex))
+        }
+        let nonBlankLines = lineTexts.filter { !$0.allSatisfy({ $0 == " " }) }
+        return nonBlankLines.suffix(20).joined(separator: "\n")
     }
 
     /// Checks whether the text contains a Claude spinner character (visible during working state)
@@ -213,6 +226,7 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         let environment = buildEnvironment()
 
+        Log.info("Starting terminal for session \(sessionId) in \(workingDirectory) (shell: \(shell))", category: "terminal")
         terminal.startProcess(
             executable: shell,
             args: ["--login"],
@@ -271,3 +285,6 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }
+        if terminals[sessionId] != nil {
+            Log.info("Destroying terminal for session \(sessionId)", category: "terminal")
+        }

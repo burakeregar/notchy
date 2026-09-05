@@ -16,6 +16,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private let hoverHideDelay: TimeInterval = 0.06
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CrashReporter.install()
         setupStatusItem()
         setupPanel()
         if settings.showNotch {
@@ -24,6 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupHotkey()
         // Detect in background so launch isn't blocked
         sessionStore.detectAllXcodeProjectsAsync()
+        Log.info("Launch complete (notch: \(settings.showNotch), pinned: \(sessionStore.isPinned), sessions restored: \(sessionStore.sessions.count))", category: "lifecycle")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        CrashReporter.markCleanExit()
     }
 
     private func setupStatusItem() {
@@ -220,6 +226,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        let logsItem = NSMenuItem(
+            title: "Open Logs Folder",
+            action: #selector(openLogsFolder),
+            keyEquivalent: ""
+        )
+        logsItem.target = self
+        menu.addItem(logsItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
@@ -268,6 +282,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func createNewSession() {
         sessionStore.createQuickSession()
+    @objc private func openLogsFolder() {
+        CrashReporter.openLogsFolder()
+    }
+
         showPanelBelowStatusItem()
     }
 

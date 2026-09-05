@@ -24,7 +24,7 @@ Notchy is a macOS menu bar app that provides a floating terminal panel anchored 
 
 **Session management**: `SessionStore` (singleton, `@Observable`) holds the list of `TerminalSession` values and the active selection. It coordinates with `XcodeDetector` to discover open Xcode projects via AppleScript (with a CGWindow title fallback). Sessions use lazy terminal startup — `hasStarted` is false until the user actually selects a tab. The store also manages sleep prevention (`IOPMAssertion`) while Claude is working, and polls for Xcode projects every 5 seconds when pinned.
 
-**Terminal status detection**: `ClickThroughTerminalView` (subclass of `LocalProcessTerminalView`) reads the terminal buffer on every `dataReceived` (debounced 150ms) and classifies the output into `TerminalStatus` states: `.working` (spinner chars + token counter), `.waitingForInput` (user prompt `❯`), `.interrupted`, `.idle`. The `idle → taskCompleted` transition uses a 3-second delay to avoid false positives from brief working→idle flickers.
+**Terminal status detection**: `ClickThroughTerminalView` (subclass of `LocalProcessTerminalView`) reads the terminal buffer on every `dataReceived` (debounced 150ms, always on the main thread — SwiftTerm's line buffer is not thread-safe and reading it from a background queue caused use-after-free crashes) and classifies the output into `TerminalStatus` states: `.working` (spinner chars + token counter), `.waitingForInput` (user prompt `❯`), `.interrupted`, `.idle`. The `idle → taskCompleted` transition uses a 3-second delay to avoid false positives from brief working→idle flickers.
 
 **Terminal embedding**: `TerminalManager` (singleton) owns a `[UUID: LocalProcessTerminalView]` dictionary. Terminals are created on demand, spawning the user's login shell, then sending `cd <project-dir> && clear && claude`. `TerminalSessionView` is an `NSViewRepresentable` that attaches/detaches the terminal view to a container based on the active session ID.
 
@@ -33,6 +33,8 @@ Notchy is a macOS menu bar app that provides a floating terminal panel anchored 
 **Tab bar**: `SessionTabBar` renders tabs with a green/gray dot indicating whether the Xcode project is still open. Tabs support rename (via context menu) and close.
 
 **Checkpoints**: `CheckpointManager` creates git snapshots using custom refs (`refs/Notchy-snapshots/<project>/<timestamp>`). It uses a temporary `GIT_INDEX_FILE` to avoid disturbing the user's staging area. Checkpoints can be created (Cmd+S or menu), listed, and restored.
+
+**Diagnostics**: `Diagnostics.swift` holds `Log` (unified log + rotating file at `~/Library/Logs/Notchy/notchy.log`) and `CrashReporter`. The reporter installs async-signal-safe handlers for fatal signals and an uncaught-exception handler that write a backtrace to `~/Library/Logs/Notchy/crashes/`, redirects stderr to `stderr.log` when no debugger is attached (captures Swift runtime trap messages), and keeps a `session.json` marker so the next launch can detect an unclean exit and copy the matching macOS `.ips` report into the crashes folder. "Open Logs Folder" in the status item menu reveals it. Use `Log.info/warning/error(_, category:)` for breadcrumbs.
 
 **Hover behavior**: `AppDelegate` manages a dual interaction model — notch hover opens the panel with mouse-tracking that auto-hides when the cursor leaves, while status item click opens normally with resign-key hiding. The backtick key (keyCode 50) is a global hotkey to toggle the panel.
 

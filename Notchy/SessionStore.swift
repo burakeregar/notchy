@@ -191,6 +191,7 @@ class SessionStore {
                 workingDirectory: project.directoryPath,
                 started: false
             )
+            Log.info("Detected Xcode project \(project.name), adding session", category: "session")
             sessions.append(session)
         }
         persistSessions()
@@ -247,6 +248,7 @@ class SessionStore {
         )
         sessions.append(session)
         activeSessionId = session.id
+        Log.info("Created quick terminal session", category: "session")
         persistSessions()
     }
 
@@ -260,6 +262,7 @@ class SessionStore {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         if sessions[index].terminalStatus != status {
             let previous = sessions[index].terminalStatus
+            Log.debug("\(sessions[index].projectName): \(previous) -> \(status)", category: "status")
             sessions[index].terminalStatus = status
             updateSleepPrevention()
 
@@ -413,6 +416,7 @@ class SessionStore {
         TerminalManager.shared.destroyTerminal(for: id)
         sessions[index].terminalStatus = .idle
         sessions[index].generation += 1
+        Log.info("Restarting session \(sessions[index].projectName)", category: "session")
     }
 
     func closeSession(_ id: UUID) {
@@ -420,6 +424,7 @@ class SessionStore {
             dismissedProjects[session.projectName] = false
         }
         TerminalManager.shared.destroyTerminal(for: id)
+            Log.info("Closing session \(session.projectName)", category: "session")
         sessions.removeAll { $0.id == id }
         if activeSessionId == id {
             activeSessionId = sessions.first?.id
