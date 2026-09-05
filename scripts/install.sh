@@ -56,5 +56,12 @@ echo "    installed $APP_NAME $VERSION (commit $COMMIT)"
 
 if (( LAUNCH )); then
     echo "==> Launching"
-    open "$INSTALL_PATH"
+    # `open` forwards this shell's environment to the app. When this script runs
+    # from inside a Claude Code session, that would hand CLAUDE_* session markers
+    # to Notchy and on to every terminal it spawns. Launch with those removed.
+    UNSET_ARGS=()
+    for var in ${(k)parameters}; do
+        [[ "$var" == CLAUDE* ]] && UNSET_ARGS+=(-u "$var")
+    done
+    env "${UNSET_ARGS[@]}" open "$INSTALL_PATH"
 fi

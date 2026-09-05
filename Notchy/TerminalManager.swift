@@ -333,6 +333,16 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "xterm-256color"
         env["LANG"] = env["LANG"] ?? "en_US.UTF-8"
+        env["TERM_PROGRAM"] = "Notchy"
+
+        // If Notchy itself was launched from inside a Claude Code session (e.g.
+        // `open` from a Claude-driven shell), it inherits that session's
+        // variables. Passing them on makes every `claude` started in a Notchy tab
+        // believe it is a child session, which disables transcript saving and
+        // breaks `claude --resume`. Sessions in Notchy tabs are always top-level.
+        for key in env.keys where key.hasPrefix("CLAUDE") {
+            env.removeValue(forKey: key)
+        }
         return env.map { "\($0.key)=\($0.value)" }
     }
 
