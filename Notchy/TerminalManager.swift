@@ -244,8 +244,8 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         // cd to working directory, launch claude only if CLAUDE.md exists and integration is enabled
         let escapedDir = shellEscape(directory)
         let hasClaude = launchClaude && SettingsManager.shared.claudeIntegrationEnabled && FileManager.default.fileExists(atPath: (directory as NSString).appendingPathComponent("CLAUDE.md"))
-        // Report once right after the cd so the stored directory is confirmed even
-        // if the shell's chpwd hook doesn't fire (e.g. already in that directory).
+        // Report once right after the cd: when claude launches in the same command
+        // line, no prompt (and so no precmd) is shown until claude exits.
         var command = cwdReportingHook(for: shell) + "cd \(escapedDir) && __notchy_cwd 2>/dev/null; clear"
         if hasClaude {
             command += " && claude"
@@ -269,7 +269,6 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
               let sessionId = terminal.sessionId,
               let path = Self.path(fromOSC7Payload: payload) else { return }
         DispatchQueue.main.async {
-            Log.debug("Session \(sessionId) cwd -> \(path)", category: "terminal")
             SessionStore.shared.updateWorkingDirectory(sessionId, directory: path)
         }
     }
@@ -291,15 +290,20 @@ class TerminalManager: NSObject, LocalProcessTerminalViewDelegate {
         return path
     }
 
-    /// Shell snippet that makes the shell announce every directory change with
+    /// Shell snippet that makes the shell announce its working directory with
     /// OSC 7, the same mechanism Terminal.app and iTerm2 use. Plain login shells
     /// spawned by Notchy don't do this on their own, so persisted tabs would
     /// otherwise never learn where the user `cd`-ed to.
+    ///
+    /// The report is attached to the prompt (precmd / PROMPT_COMMAND), not to
+    /// `cd`. A chpwd hook also fires inside command substitutions such as
+    /// `dir=$(cd "$WORKSPACE" && ls | fzf)`, where its output would be captured
+    /// into the variable and corrupt user scripts.
     private func cwdReportingHook(for shell: String) -> String {
         let report = #"printf '\033]7;file://%s%s\007' "${HOST:-localhost}" "$PWD""#
         switch (shell as NSString).lastPathComponent {
         case "zsh":
-            return "__notchy_cwd() { \(report); }; autoload -Uz add-zsh-hook && add-zsh-hook chpwd __notchy_cwd; "
+            return "__notchy_cwd() { \(report); }; autoload -Uz add-zsh-hook && add-zsh-hook precmd __notchy_cwd; "
         case "bash":
             return "__notchy_cwd() { \(report); }; PROMPT_COMMAND=\"__notchy_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; "
         default:

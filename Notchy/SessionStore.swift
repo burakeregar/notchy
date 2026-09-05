@@ -116,6 +116,7 @@ class SessionStore {
     func updateWorkingDirectory(_ id: UUID, directory: String) {
         guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
         guard sessions[index].workingDirectory != directory else { return }
+        Log.debug("\(sessions[index].projectName) cwd -> \(directory)", category: "terminal")
         sessions[index].workingDirectory = directory
         persistSessions()
     }
