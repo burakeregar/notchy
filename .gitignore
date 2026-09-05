@@ -1,6 +1,7 @@
 # Xcode
-# Build/ is tracked intentionally (public download artifact)
-!Build/
+# Release builds go to .build.noindex/ (see scripts/install.sh) and are installed to /Applications
+.build.noindex/
+Build/
 DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/

@@ -12,6 +12,17 @@ xcodebuild -project Notchy.xcodeproj -scheme Notchy -configuration Debug build
 
 There are no tests or linting configured yet.
 
+## Install / release
+
+The app the user actually runs lives in `/Applications/Notchy.app`. After any change, rebuild and reinstall it with:
+
+```bash
+scripts/install.sh            # build Release, quit the running app, copy to /Applications, relaunch
+scripts/install.sh --no-launch
+```
+
+It builds into `.build.noindex/` (gitignored; the `.noindex` suffix hides the intermediate bundle from Spotlight) so `/Applications/Notchy.app` is the only copy Spotlight lists. Avoid leaving Debug builds in DerivedData for the same reason. The app is ad-hoc signed, so a fresh install may re-prompt for Automation (Xcode) and folder access permissions.
+
 ## Overview
 
 Notchy is a macOS menu bar app that provides a floating terminal panel anchored to the MacBook notch, with automatic Xcode project detection. When the user hovers over the notch or clicks the menu bar icon, a floating panel appears with embedded terminal sessions (via SwiftTerm) that auto-`cd` into detected Xcode project directories and launch `claude`.
